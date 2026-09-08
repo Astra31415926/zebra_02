@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>ZEBRA SCANNER · ADVANCED</title>
+<title>ZEBRA SCANNER · DEBUG VIZ</title>
 <style>
   :root {
     --bg: #050507;
@@ -125,7 +125,7 @@
 
 <div id="app">
   <header>
-    <h1>ZEBRA·ADV</h1>
+    <h1>ZEBRA·DEBUG</h1>
     <div class="timer" id="timer">--:--</div>
   </header>
 
@@ -187,12 +187,23 @@ function textBits(t){const d=_enc.encode(t),b=new Uint8Array(d.length*8);for(let
 function Rof(n){return(n-1)/2;}
 function baseCells(m,n){const c=Rof(n),o=[];if(m==='oct'){for(let i=0;i<=c;i++)for(let j=0;j<=i;j++)o.push([c+i,c+j]);}else if(m==='quad'){for(let i=0;i<=c;i++)for(let j=0;j<=c;j++)o.push([c+i,c+j]);}else{for(let y=0;y<n;y++)for(let i=0;i<=c;i++)o.push([c+i,y]);}return o;}
 function mirrors(m,n,x,y){const c=Rof(n),i=x-c,j=y-c;let p;if(m==='oct')p=[[i,j],[j,i],[-i,j],[-j,i],[i,-j],[j,-i],[-i,-j],[-j,-i]];else if(m==='quad')p=[[i,j],[-i,j],[i,-j],[-i,-j]];else p=[[i,j],[-i,j]];const o=[];for(const[a,b]of p){const X=c+a,Y=c+b;if(X>=0&&Y>=0&&X<n&&Y<n)o.push([X,Y]);}return o;}
-// Зверни увагу: fillChannel тепер повертає об'єкт {g, dm} для сумісності з decoder.js
 function fillChannel(t,n,m,markBit){const g=new Uint8Array(n*n),bc=baseCells(m,n);let seq=textBits(t);if(markBit!=null){const s2=new Uint8Array(seq.length+1);s2[0]=markBit;s2.set(seq,1);seq=s2;}const lim=Math.min(seq.length,bc.length);for(let i=0;i<lim;i++){const[x,y]=bc[i];for(const[X,Y]of mirrors(m,n,x,y))if(seq[i])g[Y*n+X]=1;}return {g, dm: g};}
 function markCell(g,n,m){const[x,y]=baseCells(m,n)[0];return g[y*n+x]?1:0;}
+function decodeSector(g,n,m,offset) { return null; }
+
+// Функція для створення Canvas з пікселів (для візуалізації)
+function pxToCanvas(px, w, h) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    const idata = ctx.createImageData(w, h);
+    idata.data.set(px);
+    ctx.putImageData(idata, 0, 0);
+    return c;
+}
 
 // ==========================================
-//  АЛГОРИТМИ DECODER.JS (ТИХИЙ ХІД, АЛЕ З ЛОГАМИ)
+//  АЛГОРИТМИ DECODER.JS (З ВІЗУАЛІЗАЦІЄЮ)
 // ==========================================
 const VOTE_MARGIN = 0.5, VOTE_AGREE = 0.90;
 const ND_PAL2    = {r:[220,50,60], g:[65,195,65], b:[60,70,215]};
@@ -231,6 +242,7 @@ function recoverVoted(g,n,m,offset,markBit){
   const chk=fillChannel(v.text,n,m,markBit);let tot=0,match=0;
   for(let i=0;i<n*n;i++)if(chk.dm[i]){tot++;if((chk.g[i]?1:0)===g[i])match++;}
   if(!tot||match/tot<VOTE_AGREE)return null;
+  const s=decodeSector(g,n,m,offset);if(s!==null&&s!==v.text)return null;
   return {text:v.text,agree:match/tot};}
 
 function ruler_runs(get,len){let prev=-1,l=0,runs=[];
@@ -458,7 +470,7 @@ function v13_analyzeFlat(px,N){
   let best=null;
   const TfLo=Math.max(9,Math.floor(N/60)),TfHi=Math.floor(N/12);
   for(let Tf=TfLo;Tf<=TfHi;Tf++){const module=N/Tf;
-    for(const pad of [3,2,4]){const n=Tf-2*pad;
+    for(const pad of [1,2,3]){const n=Tf-2*pad;
       if(n<(MINN||7)||n%2===0)continue;
       for(const[dpx,dpy]of[[0,0],[0.22*module,0],[-0.22*module,0],[0,0.22*module],[0,-0.22*module]]){
         const ox=pad*module+dpx,oy=pad*module+dpy;
@@ -492,11 +504,13 @@ function v13_analyzeFlat(px,N){
           const txt=rMark?(allSame?nn[0]:nn.join('')):[vr.text,vg.text,vb.text].filter(t=>t).join('');
           const sc=nn.length*1000+txt.length;
           if(!best||sc>best.sc)best={sc,kind:allSame&&rMark?'mono':'three',mode:'oct',n,
-            res:rMark&&allSame?[txt,null,null]:[vr.text,vg.text,vb.text]};
+            res:rMark&&allSame?[txt,null,null]:[vr.text,vg.text,vb.text],
+            geom:{pad, cell:module, ox, oy, Tf, n}}; // ДОДАНО GEOM
         }else{
           for(const m of ['oct','quad','half']){const v=decodeVoted(gl,n,m,0);
             if(v.text){const sc=500+v.text.length;
-              if(!best||sc>best.sc)best={sc,kind:'one',mode:m,n,res:[v.text,null,null]};}}
+              if(!best||sc>best.sc)best={sc,kind:'one',mode:m,n,res:[v.text,null,null],
+                geom:{pad, cell:module, ox, oy, Tf, n}};}} // ДОДАНО GEOM
         }}}}
   return best;}
 
@@ -558,7 +572,7 @@ function nd_decodeAt(px,IW,IH,cell,ox,oy,pad,Tf){
     for(const m of modes){const v=decodeVoted(gl,n,m,0);
       if(v.text!==null&&v.minMargin>=ND_VMARGIN){
         const a=nd_agree(gl,fillChannel(v.text,n,m,null).g,n);
-        if(a>=ND_SOFT)out.push({kind:'one',score:a,mode:m,n,res:[v.text,null,null]});}}
+        if(a>=ND_SOFT)out.push({kind:'one',score:a,mode:m,n,res:[v.text,null,null], geom:{pad,cell,ox,oy,Tf,n}});}} // ДОДАНО GEOM
     return out;}
   const cls=nd_classify(rawR,rawG,rawB,n);
   for(const m of modes){
@@ -569,7 +583,7 @@ function nd_decodeAt(px,IW,IH,cell,ox,oy,pad,Tf){
       const aG=nd_agree(cls.cg,fillChannel(vg.text||'',n,m,null).g,n);
       const aB=nd_agree(cls.cb,fillChannel(vb.text||'',n,m,null).g,n);
       const sc=Math.min(aR,aG,aB);
-      if(sc>=ND_SOFT)out.push({kind:'three',score:sc,mode:m,n,res:[vr.text,vg.text,vb.text]});}
+      if(sc>=ND_SOFT)out.push({kind:'three',score:sc,mode:m,n,res:[vr.text,vg.text,vb.text], geom:{pad,cell,ox,oy,Tf,n}});} // ДОДАНО GEOM
     if(markCell(cls.cr,n,m)===1){const rR=decodeVoted(cls.cr,n,m,1);
       if(rR.text!==null){const rG=decodeVoted(cls.cg,n,m,0),rB=decodeVoted(cls.cb,n,m,0);
         const aR=nd_agree(cls.cr,fillChannel(rR.text,n,m,1).g,n);
@@ -577,7 +591,7 @@ function nd_decodeAt(px,IW,IH,cell,ox,oy,pad,Tf){
         const aB=nd_agree(cls.cb,fillChannel(rB.text||'',n,m,null).g,n);
         if(Math.min(aR,aG,aB)>=ND_SOFT)
           out.push({kind:'three',score:Math.min(aR,aG,aB),mode:m,n,
-                    res:[rR.text||'',rG.text||'',rB.text||'']});}}}
+                    res:[rR.text||'',rG.text||'',rB.text||''], geom:{pad,cell,ox,oy,Tf,n}});}}} // ДОДАНО GEOM
   return out;}
 
 function decodeNewFrame(px,IW,IH){
@@ -595,9 +609,9 @@ function decodeNewFrame(px,IW,IH){
       if(a.kind!==b.kind)return(a.kind==='three'?0:1)-(b.kind==='three'?0:1);
       if(bl!==al)return bl-al;return b.score-a.score;});
     return u;};
-  for(const pad of [3,2,4])cand=cand.concat(nd_decodeAt(px,IW,IH,base,0,0,pad,Tf));
+  for(const pad of [1,2,3])cand=cand.concat(nd_decodeAt(px,IW,IH,base,0,0,pad,Tf));
   if(solid(cand))return finish(cand);
-  for(const pad of [2,3,4]){
+  for(const pad of [1,2,3]){
     for(const sf of [1.0,0.994,0.997,1.003,1.006,0.991,1.009,0.988,1.012]){
       const cell=base*sf;
       for(let ox=-cell*0.4;ox<=cell*0.4+1e-6;ox+=cell*0.13)
@@ -612,6 +626,9 @@ function dedup(all){
   for(const r of all){const k=(r.kind||'')+'|'+r.res.join('\u0001');if(!seen.has(k)){seen.add(k);u.push(r);}}
   u.sort((a,b)=>b.res.filter(x=>x).join('').length-a.res.filter(x=>x).join('').length);
   return u;}
+
+// Глобальна змінна для збереження Canvas знайденого кадру
+let _debugCanvas = null;
 
 function runDecodeAttempts(img){
   Li('Запуск decodeAttempts...');
@@ -639,7 +656,7 @@ function runDecodeAttempts(img){
     const side=Math.min(IW,IH);
     const c=cropPx(px,IW,IH,{x0:Math.floor((IW-side)/2),y0:Math.floor((IH-side)/2),w:side,h:side});
     const r=decodeNewFrame(c,side,side);
-    if(r.length){all=all.concat(r);const sd=pickSolid(all);if(sd)return [sd];}
+    if(r.length){all=all.concat(r);const sd=pickSolid(all);if(sd){_debugCanvas=pxToCanvas(c,side,side);return [sd];}}
   }catch(e){Le('Fast square: '+e.message);}
 
   if(!isCanvas){
@@ -652,7 +669,7 @@ function runDecodeAttempts(img){
           Math.max(el(cor.TL,cor.TR),el(cor.TR,cor.BR),el(cor.BR,cor.BL),el(cor.BL,cor.TL)))));
         const d=deskew(px,IW,IH,cor,N);
         const b=v13_analyzeFlat(d,N);
-        if(b){Lok('Desktop знайдено!');return [b];}}}catch(e){Le('Desktop: '+e.message);}}
+        if(b){Lok('Desktop знайдено!');_debugCanvas=pxToCanvas(d,N,N);return [b];}}}catch(e){Le('Desktop: '+e.message);}}
 
   try{
     Li('Крок 3: findCodeBox...');
@@ -665,7 +682,7 @@ function runDecodeAttempts(img){
         const ss=Math.min(s,IW-nx,IH-ny);if(ss<40)continue;
         const c=cropPx(px,IW,IH,{x0:nx,y0:ny,w:ss,h:ss});
         const r=decodeNewFrame(c,ss,ss);
-        if(r.length){all=all.concat(r);const sd=pickSolid(all);if(sd)return [sd];}}}}catch(e){Le('CodeBox: '+e.message);}
+        if(r.length){all=all.concat(r);const sd=pickSolid(all);if(sd){_debugCanvas=pxToCanvas(c,ss,ss);return [sd];}}}}}catch(e){Le('CodeBox: '+e.message);}
 
   try{
     Li('Крок 4: Ornament crop...');
@@ -673,7 +690,7 @@ function runDecodeAttempts(img){
     if(box&&box.w>=40&&box.h>=40){
       const cpx=cropPx(px,IW,IH,box);
       const r=decodeNewFrame(cpx,box.w,box.h);
-      if(r.length){all=all.concat(r);if(hasSolid())return dedup(all);}}}catch(e){Le('Ornament: '+e.message);}
+      if(r.length){all=all.concat(r);if(hasSolid()){const sd=pickSolid(all);_debugCanvas=pxToCanvas(cpx,box.w,box.h);return dedup(all);}}}}catch(e){Le('Ornament: '+e.message);}
 
   try{
     Li('Крок 5: gradCorners...');
@@ -687,9 +704,9 @@ function runDecodeAttempts(img){
         const N=Math.max(256,Math.min(1200,Math.round(cor.side*ef)));
         const d=deskew(px,IW,IH,cc,N);
         const r=decodeNewFrame(d,N,N);
-        if(r.length){all=all.concat(r);const sd=pickSolid(all);if(sd)return [sd];}}}}catch(e){Le('gradCorners: '+e.message);}
+        if(r.length){all=all.concat(r);const sd=pickSolid(all);if(sd){_debugCanvas=pxToCanvas(d,N,N);return [sd];}}}}}catch(e){Le('gradCorners: '+e.message);}
 
-  if(hasSolid())return dedup(all);
+  if(hasSolid()){const sd=pickSolid(all);_debugCanvas=_debugCanvas||pxToCanvas(px,IW,IH);return dedup(all);}
 
   try{
     Li('Крок 6: Bradley + Ruler recovery...');
@@ -702,7 +719,7 @@ function runDecodeAttempts(img){
           const ru=findRuler(bin,box.w,box.h);
           if(ru){
             const T=ru.T,cell=box.w/T;
-            for(let pad=2;pad<=6;pad++){const n=T-2*pad;if(n<MINN||n%2===0)continue;
+            for(let pad=1;pad<=6;pad++){const n=T-2*pad;if(n<MINN||n%2===0)continue;
               const gl=new Uint8Array(n*n);
               for(let y=0;y<n;y++)for(let x=0;x<n;x++){
                 const X=Math.min(box.w-1,Math.floor((x+pad+.5)*cell));
@@ -710,11 +727,55 @@ function runDecodeAttempts(img){
                 const p=(Y*box.w+X)*4;gl[y*n+x]=((bin[p]+bin[p+1]+bin[p+2])/3)>127?1:0;}
               for(const m of ['oct','quad','half']){
                 const rv=recoverVoted(gl,n,m,0,null);
-                if(rv)all.push({kind:'recovered',score:rv.agree,mode:m,n,res:[rv.text,null,null]});}}}
+                if(rv){all.push({kind:'recovered',score:rv.agree,mode:m,n,res:[rv.text,null,null], geom:{pad,cell,ox:0,oy:0,Tf:T,n}});
+                       _debugCanvas=pxToCanvas(bin,box.w,box.h);}}}
         }catch(e){}
       }}}catch(e){Le('Bradley: '+e.message);}
 
   return dedup(all);}  
+
+// ==========================================
+//  ВІЗУАЛІЗАЦІЯ СІТКИ ТА КРУЖЕЧКІВ
+// ==========================================
+function drawDebugOverlay(ctx, geom) {
+  if(!geom) return;
+  const {pad, cell, ox, oy, Tf, n} = geom;
+  
+  const startX = pad * cell + ox;
+  const startY = pad * cell + oy;
+  const endX = (pad + n) * cell + ox;
+  const endY = (pad + n) * cell + oy;
+
+  // Малюємо рамку (зебру) напівпрозорим жовтим
+  ctx.fillStyle = 'rgba(255, 220, 50, 0.15)';
+  ctx.fillRect(0, 0, Tf*cell, pad*cell); // top
+  ctx.fillRect(0, (pad+n)*cell, Tf*cell, pad*cell); // bottom
+  ctx.fillRect(0, 0, pad*cell, Tf*cell); // left
+  ctx.fillRect((pad+n)*cell, 0, pad*cell, Tf*cell); // right
+
+  // Малюємо сітку
+  ctx.strokeStyle = 'rgba(40, 120, 200, 0.6)';
+  ctx.lineWidth = 1;
+  for(let i=0; i<=n; i++) {
+    const p = (pad + i) * cell + ox;
+    ctx.beginPath(); ctx.moveTo(p, startY); ctx.lineTo(p, endY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(startX, p); ctx.lineTo(endX, p); ctx.stroke();
+  }
+
+  // Малюємо кружечки
+  const cr = cell * 0.28;
+  ctx.strokeStyle = 'rgba(80, 235, 120, 0.8)';
+  ctx.lineWidth = 1;
+  for(let y=0; y<n; y++) {
+    for(let x=0; x<n; x++) {
+      const cx = (x + pad + 0.5) * cell + ox;
+      const cy = (y + pad + 0.5) * cell + oy;
+      ctx.beginPath();
+      ctx.arc(cx, cy, cr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
 
 // ==========================================
 //  ГОЛОВНА ФУНКЦІЯ ОБРОБКИ
@@ -723,6 +784,8 @@ const mainCnv = document.getElementById('cnv');
 
 function processImage(img, keepLog = false){
   if(!keepLog) clrLog();
+  _debugCanvas = null; // Скидаємо
+  window.ZEBRA_DEBUG = null;
   
   const video = document.getElementById('video');
   video.style.display = 'none';
@@ -740,16 +803,22 @@ function processImage(img, keepLog = false){
     Lok('РЕЗУЛЬТАТ: "' + text + '" [' + best.kind + ' / ' + best.mode + ']');
     setSt('✓ УСПІХ: ' + text, true);
     
-    const iw = img.naturalWidth || img.width;
-    const ih = img.naturalHeight || img.height;
-    mainCnv.width = iw; mainCnv.height = ih;
-    mainCnv.getContext('2d').drawImage(img, 0, 0, iw, ih);
-    
+    // МАЛЮЄМО РЕЗУЛЬТАТ
+    if (_debugCanvas) {
+      mainCnv.width = _debugCanvas.width; mainCnv.height = _debugCanvas.height;
+      const ctx = mainCnv.getContext('2d');
+      ctx.drawImage(_debugCanvas, 0, 0);
+      if (best.geom) drawDebugOverlay(ctx, best.geom);
+    } else {
+      const iw = img.naturalWidth || img.width;
+      const ih = img.naturalHeight || img.height;
+      mainCnv.width = iw; mainCnv.height = ih;
+      mainCnv.getContext('2d').drawImage(img, 0, 0, iw, ih);
+    }
     return true;
   } else {
     Le('Декод не вдався.');
     setSt('Не розпізнано.', false);
-    
     const iw = img.naturalWidth || img.width;
     const ih = img.naturalHeight || img.height;
     mainCnv.width = iw; mainCnv.height = ih;
@@ -829,7 +898,6 @@ async function startScanner() {
                         return;
                     }
                     
-                    // Center Crop (70%)
                     const cropW = vw * 0.70;
                     const cropH = vh * 0.70;
                     const sx = (vw - cropW) / 2;

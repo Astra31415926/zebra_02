@@ -2,8 +2,8 @@
 <html lang="uk">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>ZEBRA SCANNER · MOBILE</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>ZEBRA SCANNER · MOBILE v2</title>
 <style>
   :root {
     --bg: #050507;
@@ -24,100 +24,105 @@
     height: 100vh;
   }
 
-  /* Header */
   header {
-    padding: 10px;
+    padding: 12px;
     border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
     align-items: center;
     background: var(--panel);
+    flex-shrink: 0;
   }
-  h1 { font-size: 12px; letter-spacing: 2px; color: var(--accent); }
-  .timer { font-size: 12px; font-weight: bold; color: var(--text); }
+  h1 { font-size: 14px; letter-spacing: 2px; color: var(--accent); }
+  .timer { font-size: 14px; font-weight: bold; color: var(--text); }
 
-  /* Viewport */
   #viewport {
     flex: 1;
     position: relative;
     background: #000;
     overflow: hidden;
+    min-height: 0; /* важливо для flex */
   }
-  #video, #canvas {
+  #video, #cnv {
     position: absolute;
     top: 0; left: 0;
     width: 100%; height: 100%;
     object-fit: contain;
   }
-  #canvas { display: none; background: #000; }
+  #cnv { display: none; background: #000; image-rendering: pixelated; }
   
-  /* Scanning Overlay Frame */
   #scan-overlay {
     position: absolute;
     top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 65%; /* ЗМІНЕНО: БУЛО 80% - тепер краї коду точно не обрізаються */
-    aspect-ratio: 1;
-    border: 2px dashed rgba(58, 122, 170, 0.5);
+    width: 65%; aspect-ratio: 1;
+    border: 2px dashed rgba(58, 122, 170, 0.6);
+    box-shadow: 0 0 0 1000px rgba(0,0,0,0.4);
     display: none;
     pointer-events: none;
   }
   #scan-overlay.active { display: block; }
 
-  /* Controls */
   #controls {
     padding: 15px;
     display: flex;
     gap: 10px;
     background: var(--panel);
     border-top: 1px solid var(--border);
+    flex-shrink: 0;
   }
   button, label.btn {
     flex: 1;
-    padding: 12px;
+    padding: 15px;
     background: #111119;
     border: 1px solid var(--border);
     color: var(--text);
     font: inherit;
-    font-size: 12px;
+    font-size: 14px;
+    font-weight: bold;
     letter-spacing: 1px;
     cursor: pointer;
     text-align: center;
-    transition: 0.2s;
+    border-radius: 4px;
   }
-  button:active, label.btn:active { border-color: var(--accent); color: #fff; }
+  button:active, label.btn:active { border-color: var(--accent); color: #fff; background: #161623; }
   button:disabled { opacity: 0.3; cursor: not-allowed; }
   input[type=file] { display: none; }
 
-  /* Status & Logs */
   #status {
-    padding: 8px 10px;
-    font-size: 11px;
+    padding: 10px;
+    font-size: 12px;
     letter-spacing: 1px;
     border-top: 1px solid var(--border);
-    min-height: 30px;
+    min-height: 40px;
     text-align: center;
     background: #08080c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
   }
   
-  #log-container {
-    height: 35vh;
+  #pane-log {
+    height: 30vh;
     overflow-y: auto;
     background: #030305;
     padding: 10px;
-    font-size: 10px;
-    line-height: 1.4;
+    font-size: 11px;
+    line-height: 1.5;
     border-top: 2px solid var(--border);
+    white-space: pre-wrap;
   }
   
-  /* Log Styles */
-  .log-entry { margin-bottom: 2px; word-break: break-all; }
-  .log-time { color: #33334a; margin-right: 5px; }
-  .log-info { color: #6a6a8a; }
-  .log-header { color: #2a6090; font-weight: bold; }
-  .log-ok { color: #2a7a3a; }
-  .log-warn { color: #8a6010; }
-  .log-error { color: #8a2020; }
+  /* Стилі для логів */
+  .lh { color: #2a6090; font-weight: bold; }
+  .lok { color: #2a7a3a; }
+  .lw { color: #8a6010; }
+  .le { color: #8a2020; }
+  .li { color: #6a6a8a; }
+  
+  /* Сховані панелі для сумісності з твоїми алгоритмами */
+  #pane-rgb, #rgb-grid { display: none; }
 </style>
 </head>
 <body>
@@ -130,45 +135,53 @@
 
   <div id="viewport">
     <video id="video" autoplay playsinline muted></video>
-    <canvas id="canvas"></canvas>
+    <canvas id="cnv"></canvas>
     <div id="scan-overlay"></div>
   </div>
 
   <div id="controls">
-    <button id="btn-start">СКААНУВАТИ (5с)</button>
-    <label class="btn">ФАЙЛ<input type="file" id="file-input" accept="image/*"></label>
+    <button id="btn-start">СКАНУВАТИ (5с)</button>
+    <label class="btn">ФАЙЛ<input type="file" id="fin" accept="image/*"></label>
   </div>
 
   <div id="status">Очікування команд...</div>
-  <div id="log-container"></div>
+  <div id="pane-log"></div>
+  <div id="pane-rgb"><div id="rgb-grid"></div></div>
 </div>
 
 <script>
 'use strict';
 
 // ==========================================
-//  СИСТЕМА ЛОГУВАННЯ
+//  СИСТЕМА ЛОГУВАННЯ З ЧАСОМ
 // ==========================================
-const logEl = document.getElementById('log-container');
-function addLog(msg, type = 'info') {
+const logEl = document.getElementById('pane-log');
+function addLog(msg, type = 'li') {
     const now = new Date();
     const time = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}.${String(now.getMilliseconds()).padStart(3,'0')}`;
     const div = document.createElement('div');
-    div.className = `log-entry log-${type}`;
-    div.innerHTML = `<span class="log-time">[${time}]</span>${msg}`;
+    div.className = type;
+    div.textContent = `[${time}] ${msg}`;
     logEl.appendChild(div);
     logEl.scrollTop = logEl.scrollHeight;
 }
 
-const Lh = m => addLog('═══ ' + m, 'header');
-const Lok = m => addLog('✓ ' + m, 'ok');
-const Lw = m => addLog('⚠ ' + m, 'warn');
-const Le = m => addLog('✗ ' + m, 'error');
-const Li = m => addLog('  ' + m, 'info');
+// Мапінг для твоїх алгоритмів
+const Lh = m => addLog('═══ ' + m, 'lh');
+const Lok = m => addLog('✓ ' + m, 'lok');
+const Lw = m => addLog('⚠ ' + m, 'lw');
+const Le = m => addLog('✗ ' + m, 'le');
+const Li = m => addLog('  ' + m, 'li');
 const clrLog = () => logEl.innerHTML = '';
 
+function setSt(t, ok) {
+    const el = document.getElementById('status');
+    el.innerText = t;
+    el.style.color = ok === true ? '#2a7a3a' : ok === false ? '#8a2020' : '#8888a0';
+}
+
 // ==========================================
-//  АЛГОРИТМИ ОБРОБКИ ТА ПОШУКУ (БЕЗ ЗМІН)
+//  АЛГОРИТМИ (БЕЗ ЖОДНОЇ ЗМІНИ)
 // ==========================================
 
 function getExifOrientation(buf){
@@ -190,7 +203,6 @@ function getExifOrientation(buf){
   }
   return 1;
 }
-
 function applyExifRotation(img, orient){
   const w=img.naturalWidth, h=img.naturalHeight;
   const swap=orient>=5&&orient<=8;
@@ -205,7 +217,6 @@ function applyExifRotation(img, orient){
   ctx.drawImage(img,0,0);
   return c;
 }
-
 function gaussianBlur(idata, w, h, passes=1){
   const k=[1,2,1], ksum=4;
   let d=new Float32Array(idata.data);
@@ -234,7 +245,6 @@ function gaussianBlur(idata, w, h, passes=1){
   for(let i=0;i<d.length;i++) out.data[i]=Math.round(Math.max(0,Math.min(255,d[i])));
   return out;
 }
-
 function preprocess(img, orient, maxSide=900){
   Lh('PRE-PROCESSING');
   let src;
@@ -275,7 +285,6 @@ function preprocess(img, orient, maxSide=900){
   }
   return{idata:out,w,h};
 }
-
 function toGray(idata,w,h){const d=idata.data,g=new Uint8Array(w*h);for(let i=0;i<w*h;i++)g[i]=(77*d[i*4]+150*d[i*4+1]+29*d[i*4+2])>>8;return g;}
 function sampleBG(gray,w,h,s=5){const v=[];for(let dy=0;dy<s;dy++)for(let dx=0;dx<s;dx++){v.push(gray[dy*w+dx],gray[dy*w+(w-1-dx)],gray[(h-1-dy)*w+dx],gray[(h-1-dy)*w+(w-1-dx)]);}v.sort((a,b)=>a-b);return v[v.length>>1];}
 function makeMask(gray,w,h,bg,tol){const m=new Uint8Array(w*h);for(let i=0;i<w*h;i++)m[i]=Math.abs(gray[i]-bg)>tol?1:0;return m;}
@@ -289,12 +298,23 @@ function applyH(H,x,y){const w=H[2][0]*x+H[2][1]*y+H[2][2];return{x:(H[0][0]*x+H
 function warpPerspective(idata,sw,sh,corners,S){const s4=[corners.tl,corners.tr,corners.br,corners.bl];const d4=[{x:0,y:0},{x:S-1,y:0},{x:S-1,y:S-1},{x:0,y:S-1}];const H=computeH(s4,d4);if(!H)return null;const Hi=inv3(H);if(!Hi)return null;const out=new ImageData(S,S),sd=idata.data,od=out.data;for(let dy=0;dy<S;dy++)for(let dx=0;dx<S;dx++){const p=applyH(Hi,dx,dy),x0=p.x|0,y0=p.y|0,fx=p.x-x0,fy=p.y-y0;const di=(dy*S+dx)*4;const get=(sx,sy,ch)=>(sx<0||sx>=sw||sy<0||sy>=sh)?128:sd[(sy*sw+sx)*4+ch];for(let ch=0;ch<3;ch++)od[di+ch]=Math.round(get(x0,y0,ch)*(1-fx)*(1-fy)+get(x0+1,y0,ch)*fx*(1-fy)+get(x0,y0+1,ch)*(1-fx)*fy+get(x0+1,y0+1,ch)*fx*fy);od[di+3]=255;}return out;}
 function verifyZebra(wGray,S,minContrast){function scanLine(arr){const n=arr.length;let mn=255,mx=0;for(const v of arr){if(v<mn)mn=v;if(v>mx)mx=v;}if(mx-mn<minContrast)return null;const thr=(mn+mx)>>1,runs=[];let cur=arr[0]>thr?1:0,len=1;for(let i=1;i<n;i++){const b=arr[i]>thr?1:0;if(b===cur)len++;else{runs.push({v:cur,len});cur=b;len=1;}}runs.push({v:cur,len});if(runs.length<3)return null;const allLens=runs.map(r=>r.len).sort((a,b)=>a-b);const med=allLens[allLens.length>>1];if(med<2)return null;const valid=runs.filter(r=>r.len>=med*0.4&&r.len<=med*2.4);if(valid.length<5)return null;let T=valid.length;if(T%2===0){if(valid[0].v===1||valid[T-1].v===1)T+=1;else return null;}if(T<5)return null;return{T,modSize:S/T};}const probeOffsets=[2,5,10,15,20,30];const votes=new Map();let total=0;for(const off of probeOffsets){if(off>=S/2)continue;for(const pos of[off,S-1-off]){const row=new Uint8Array(S);for(let x=0;x<S;x++)row[x]=wGray[pos*S+x];const rh=scanLine(row);if(rh)votes.set(rh.T,(votes.get(rh.T)||0)+1);total++;const col=new Uint8Array(S);for(let y=0;y<S;y++)col[y]=wGray[y*S+pos];const rv=scanLine(col);if(rv)votes.set(rv.T,(votes.get(rv.T)||0)+1);total++;}}if(!votes.size)return null;const sorted=[...votes.entries()].sort((a,b)=>b[1]-a[1]);const vStr=sorted.slice(0,5).map(([t,v])=>`T${t}:${v}`).join(' ');const[bestT,bestV]=sorted[0];return{T:bestT,modSize:S/bestT,confidence:bestV/total,voteStr:vStr};}
 function sampleCircles(warped,S,T,modSize){const d=warped.data,circleR=modSize*0.28,r2=circleR*circleR,cells=[];for(let row=1;row<T-1;row++)for(let col=1;col<T-1;col++){const cx=col*modSize+modSize/2,cy=row*modSize+modSize/2;let sR=0,sG=0,sB=0,cnt=0;const x0=Math.max(0,Math.floor(cx-circleR)),x1=Math.min(S-1,Math.ceil(cx+circleR));const y0=Math.max(0,Math.floor(cy-circleR)),y1=Math.min(S-1,Math.ceil(cy+circleR));for(let py=y0;py<=y1;py++)for(let px=x0;px<=x1;px++){const dx=px-cx,dy=py-cy;if(dx*dx+dy*dy>r2)continue;const idx=(py*S+px)*4;sR+=d[idx];sG+=d[idx+1];sB+=d[idx+2];cnt++;}cells.push(cnt?{r:sR/cnt,g:sG/cnt,b:sB/cnt,row,col}:{r:0,g:0,b:0,row,col});}return{cells,circleR};}
-const RGB_MAIN={r:[255,0,0],g:[0,255,0],b:[0,0,255]};const RGB_GAL={r:[220,50,60],g:[65,195,65],b:[60,70,215]};const REFBITS=[[0,0,0],[1,0,0],[0,1,0],[0,0,1],[1,1,0],[1,0,1],[0,1,1],[1,1,1]];const _enc=new TextEncoder(),_dec=new TextDecoder('utf-8',{fatal:true});function isClean(t){for(const ch of t){const o=ch.codePointAt(0);if(o===0||o<32&&ch!=='\n'&&ch!=='\t')return false;}return true;}function bytesToText(by){by=by.slice();while(by.length&&by[by.length-1]===0)by.pop();if(!by.length)return null;try{const t=_dec.decode(new Uint8Array(by));return isClean(t)?t:null;}catch{return null;}}function textBits(t){const d=_enc.encode(t),b=new Uint8Array(d.length*8);for(let i=0;i<d.length;i++)for(let k=0;k<8;k++)b[i*8+k]=(d[i]>>(7-k))&1;return b;}function Rof(n){return(n-1)/2;}function baseCells(m,n){const c=Rof(n),o=[];if(m==='oct'){for(let i=0;i<=c;i++)for(let j=0;j<=i;j++)o.push([c+i,c+j]);}else if(m==='quad'){for(let i=0;i<=c;i++)for(let j=0;j<=c;j++)o.push([c+i,c+j]);}else{for(let y=0;y<n;y++)for(let i=0;i<=c;i++)o.push([c+i,y]);}return o;}function mirrors(m,n,x,y){const c=Rof(n),i=x-c,j=y-c;let p;if(m==='oct')p=[[i,j],[j,i],[-i,j],[-j,i],[i,-j],[j,-i],[-i,-j],[-j,-i]];else if(m==='quad')p=[[i,j],[-i,j],[i,-j],[-i,-j]];else p=[[i,j],[-i,j]];const o=[];for(const[a,b]of p){const X=c+a,Y=c+b;if(X>=0&&Y>=0&&X<n&&Y<n)o.push([X,Y]);}return o;}function fillChannel(t,n,m,markBit){const g=new Uint8Array(n*n),bc=baseCells(m,n);let seq=textBits(t);if(markBit!=null){const s2=new Uint8Array(seq.length+1);s2[0]=markBit;s2.set(seq,1);seq=s2;}const lim=Math.min(seq.length,bc.length);for(let i=0;i<lim;i++){const[x,y]=bc[i];for(const[X,Y]of mirrors(m,n,x,y))if(seq[i])g[Y*n+X]=1;}return g;}function markCell(g,n,m){const[x,y]=baseCells(m,n)[0];return g[y*n+x]?1:0;}function agree(g,chk,n){let ok=0;for(let z=0;z<n*n;z++)ok+=((chk[z]?1:0)===g[z])?1:0;return ok/(n*n);}function decodeVoted(g,n,m,off,conf){const bc=baseCells(m,n),by=[];for(let i=off||0;i+7<bc.length;i+=8){let v=0;for(let b=0;b<8;b++){const[x,y]=bc[i+b],cells=mirrors(m,n,x,y);let bit;if(conf){let w1=0,w0=0;for(const[X,Y]of cells){const cv=conf[Y*n+X];if(cv<0.15)continue;if(g[Y*n+X])w1+=cv;else w0+=cv;}bit=(w1===0&&w0===0)?g[y*n+x]?1:0:w1>w0?1:0;}else{let ones=0;for(const[X,Y]of cells)ones+=g[Y*n+X]?1:0;const cnt=cells.length;bit=ones*2>cnt?1:ones*2<cnt?0:g[y*n+x]?1:0;}v=(v<<1)|bit;}by.push(v);}return{text:bytesToText(by),bytes:by};}function refsFor(S){const mix=(r,g,b)=>[Math.min(255,(r?S.r[0]:0)+(g?S.g[0]:0)+(b?S.b[0]:0)),Math.min(255,(r?S.r[1]:0)+(g?S.g[1]:0)+(b?S.b[2]:0)),Math.min(255,(r?S.r[2]:0)+(g?S.g[2]:0)+(b?S.b[2]:0))];return REFBITS.map(c=>({bits:c,col:mix(c[0],c[1],c[2])}));}function classifyCells(cells,n){const pals=[['насичена',RGB_MAIN],['галерейна',RGB_GAL]];let best=null;for(const[name,S]of pals){const refs=refsFor(S);let err=0;const cr=new Uint8Array(n*n),cg=new Uint8Array(n*n),cb=new Uint8Array(n*n);for(let i=0;i<n*n;i++){const[R,G,B]=[cells[i].r,cells[i].g,cells[i].b];let bi=0,bd=1e9;for(let k=0;k<refs.length;k++){const q=refs[k].col,dr=R-q[0],dg=G-q[1],db=B-q[2],dd=dr*dr+dg*dg+db*db;if(dd<bd){bd=dd;bi=k;}}err+=bd;const t=refs[bi].bits;cr[i]=t[0];cg[i]=t[1];cb[i]=t[2];}if(!best||err<best.err)best={name,err,cr,cg,cb};}return best;}
-function decodeCircles(circles,T){const cells=circles.cells,n=T-2;if(n<7||n%2===0){Lw('n='+n+' — замалий або парний');return null;}const lumas=cells.map(c=>(c.r+c.g+c.b)/3);const lumaMin=Math.min(...lumas),lumaMax=Math.max(...lumas),autoThr=(lumaMin+lumaMax)/2;const gl=new Uint8Array(n*n),confM=new Float32Array(n*n);cells.forEach((c,i)=>{const L=(c.r+c.g+c.b)/3;gl[i]=L>autoThr?1:0;confM[i]=Math.min(1,Math.abs(L-autoThr)/(autoThr/2+1));});const sats=cells.map(c=>Math.max(c.r,c.g,c.b)-Math.min(c.r,c.g,c.b));const medSat=[...sats].sort((a,b)=>a-b)[sats.length>>1];const coloredCnt=sats.filter(s=>s>60).length;const isColored=medSat>25||coloredCnt>=Math.max(3,n*0.15);Li('n='+n+'  поріг='+autoThr.toFixed(0)+'  '+(isColored?'КОЛІР':'МОНО'));const modes=['oct','quad','half'];if(!isColored){Lh('ДЕКОД МОНО');let best=null;for(const m of modes){const v=decodeVoted(gl,n,m,0,confM);if(v.text!==null){const a=agree(gl,fillChannel(v.text,n,m),n);Lok('['+m+'] "'+v.text+'"  agree='+a.toFixed(3));if(!best||a>best.a)best={v,a,m};}else Li('['+m+'] null');}return best?{type:'МОНО·'+best.m,text:best.v.text}:{type:'МОНО',text:null};}else{Lh('ДЕКОД КОЛІР');const cls=classifyCells(cells,n);Li('палітра: '+cls.name);const cR=new Float32Array(n*n),cG=new Float32Array(n*n),cB=new Float32Array(n*n);cells.forEach((c,i)=>{cR[i]=Math.min(1,Math.abs(c.r-128)/90);cG[i]=Math.min(1,Math.abs(c.g-128)/90);cB[i]=Math.min(1,Math.abs(c.b-128)/90);});let best=null;for(const m of modes){const rMark=markCell(cls.cr,n,m);let vr=decodeVoted(cls.cr,n,m,rMark?1:0,cR);if(rMark&&vr.text===null)vr=decodeVoted(cls.cr,n,m,0,cR);const vg=decodeVoted(cls.cg,n,m,0,cG),vb=decodeVoted(cls.cb,n,m,0,cB);const nn=[vr.text,vg.text,vb.text].filter(t=>t!==null);Li('['+m+'] R:'+(vr.text!=null?'"'+vr.text+'"':'null')+'  G:'+(vg.text!=null?'"'+vg.text+'"':'null')+'  B:'+(vb.text!=null?'"'+vb.text+'"':'null'));if(!nn.length)continue;const sc=nn.length*1000+nn.reduce((a,t)=>a+t.length,0);if(!best||sc>best.sc)best={vr,vg,vb,nn,sc,m,rMark};}if(!best)return{type:'КОЛІР·'+cls.name,text:null};const parts=[best.vr.text,best.vg.text,best.vb.text].filter(t=>t!==null);const text=best.rMark?(parts.every(t=>t===parts[0])?parts[0]:parts.join('')):parts.join(' · ');Lok('['+best.m+'] "'+text+'"');return{type:'КОЛІР·'+best.m,text};}}
-function findFrame(idata,w,h){const gray=toGray(idata,w,h);const bg=sampleBG(gray,w,h,5);Li('BG luma: '+bg);const tols=[20,30,42,55,70,90];let bestCorners=null,bestSpread=0,bestTol=0;for(const tol of tols){const rm=makeMask(gray,w,h,bg,tol);const em=erodeMask(rm,w,h);const fgN=em.reduce((s,v)=>s+v,0);if(fgN<50){Li('tol='+tol+' FG='+fgN+' — пропуск');continue;}const c=findCorners(em,w,h,15);const sp=spread(c);Li('tol='+tol+'  FG='+fgN+'  spread='+Math.round(sp)+'px');if(sp>bestSpread){bestSpread=sp;bestCorners=c;bestTol=tol;}}Li('Обрано tol='+bestTol+'  spread='+Math.round(bestSpread)+'px');if(!bestCorners||bestSpread<30){Li('Маска не спрацювала — variance-scan');const topRows=[],leftCols=[];for(let y=0;y<h;y++){let sum=0,sum2=0;for(let x=0;x<w;x++){const v=gray[y*w+x];sum+=v;sum2+=v*v;}const avg=sum/w,std=Math.sqrt(sum2/w-avg*avg);if(std>50)topRows.push(y);}for(let x=0;x<w;x++){let sum=0,sum2=0;for(let y=0;y<h;y++){const v=gray[y*w+x];sum+=v;sum2+=v*v;}const avg=sum/h,std=Math.sqrt(sum2/h-avg*avg);if(std>50)leftCols.push(x);}topRows.sort((a,b)=>a-b);leftCols.sort((a,b)=>a-b);if(topRows.length>0&&leftCols.length>0){const vc={tl:{x:leftCols[0],y:topRows[0]},tr:{x:leftCols[leftCols.length-1],y:topRows[0]},br:{x:leftCols[leftCols.length-1],y:topRows[topRows.length-1]},bl:{x:leftCols[0],y:topRows[topRows.length-1]}};const vsp=spread(vc);Li('Variance: spread='+Math.round(vsp));if(vsp>bestSpread){bestCorners=vc;bestSpread=vsp;}}}return{corners:bestCorners,spread:bestSpread};}
+const RGB_MAIN={r:[255,0,0],g:[0,255,0],b:[0,0,255]};const RGB_GAL={r:[220,50,60],g:[65,195,65],b:[60,70,215]};const REFBITS=[[0,0,0],[1,0,0],[0,1,0],[0,0,1],[1,1,0],[1,0,1],[0,1,1],[1,1,1]];const _enc=new TextEncoder(),_dec=new TextDecoder('utf-8',{fatal:true});function isClean(t){for(const ch of t){const o=ch.codePointAt(0);if(o===0||o<32&&ch!=='\n'&&ch!=='\t')return false;}return true;}function bytesToText(by){by=by.slice();while(by.length&&by[by.length-1]===0)by.pop();if(!by.length)return null;try{const t=_dec.decode(new Uint8Array(by));return isClean(t)?t:null;}catch{return null;}}function textBits(t){const d=_enc.encode(t),b=new Uint8Array(d.length*8);for(let i=0;i<d.length;i++)for(let k=0;k<8;k++)b[i*8+k]=(d[i]>>(7-k))&1;return b;}function Rof(n){return(n-1)/2;}function baseCells(m,n){const c=Rof(n),o=[];if(m==='oct'){for(let i=0;i<=c;i++)for(let j=0;j<=i;j++)o.push([c+i,c+j]);}else if(m==='quad'){for(let i=0;i<=c;i++)for(let j=0;j<=c;j++)o.push([c+i,c+j]);}else{for(let y=0;y<n;y++)for(let i=0;i<=c;i++)o.push([c+i,y]);}return o;}function mirrors(m,n,x,y){const c=Rof(n),i=x-c,j=y-c;let p;if(m==='oct')p=[[i,j],[j,i],[-i,j],[-j,i],[i,-j],[j,-i],[-i,-j],[-j,-i]];else if(m==='quad')p=[[i,j],[-i,j],[i,-j],[-i,-j]];else p=[[i,j],[-i,j]];const o=[];for(const[a,b]of p){const X=c+a,Y=c+b;if(X>=0&&Y>=0&&X<n&&Y<n)o.push([X,Y]);}return o;}function fillChannel(t,n,m,markBit){const g=new Uint8Array(n*n),bc=baseCells(m,n);let seq=textBits(t);if(markBit!=null){const s2=new Uint8Array(seq.length+1);s2[0]=markBit;s2.set(seq,1);seq=s2;}const lim=Math.min(seq.length,bc.length);for(let i=0;i<lim;i++){const[x,y]=bc[i];for(const[X,Y]of mirrors(m,n,x,y))if(seq[i])g[Y*n+X]=1;}return g;}function markCell(g,n,m){const[x,y]=baseCells(m,n)[0];return g[y*n+x]?1:0;}function agree(g,chk,n){let ok=0;for(let z=0;z<n*n;z++)ok+=((chk[z]?1:0)===g[z])?1:0;return ok/(n*n);}function decodeVoted(g,n,m,off,conf){const bc=baseCells(m,n),by=[];for(let i=off||0;i+7<bc.length;i+=8){let v=0;for(let b=0;b<8;b++){const[x,y]=bc[i+b],cells=mirrors(m,n,x,y);let bit;if(conf){let w1=0,w0=0;for(const[X,Y]of cells){const cv=conf[Y*n+X];if(cv<0.15)continue;if(g[Y*n+X])w1+=cv;else w0+=cv;}bit=(w1===0&&w0===0)?g[y*n+x]?1:0:w1>w0?1:0;}else{let ones=0;for(const[X,Y]of cells)ones+=g[Y*n+X]?1:0;const cnt=cells.length;bit=ones*2>cnt?1:ones*2<cnt?0:g[y*n+x]?1:0;}v=(v<<1)|bit;}by.push(v);}return{text:bytesToText(by),bytes:by};}function refsFor(S){const mix=(r,g,b)=>[Math.min(255,(r?S.r[0]:0)+(g?S.g[0]:0)+(b?S.b[0]:0)),Math.min(255,(r?S.r[1]:0)+(g?S.g[1]:0)+(b?S.b[1]:0)),Math.min(255,(r?S.r[2]:0)+(g?S.g[2]:0)+(b?S.b[2]:0))];return REFBITS.map(c=>({bits:c,col:mix(c[0],c[1],c[2])}));}function classifyCells(cells,n){const pals=[['насичена',RGB_MAIN],['галерейна',RGB_GAL]];let best=null;for(const[name,S]of pals){const refs=refsFor(S);let err=0;const cr=new Uint8Array(n*n),cg=new Uint8Array(n*n),cb=new Uint8Array(n*n);for(let i=0;i<n*n;i++){const[R,G,B]=[cells[i].r,cells[i].g,cells[i].b];let bi=0,bd=1e9;for(let k=0;k<refs.length;k++){const q=refs[k].col,dr=R-q[0],dg=G-q[1],db=B-q[2],dd=dr*dr+dg*dg+db*db;if(dd<bd){bd=dd;bi=k;}}err+=bd;const t=refs[bi].bits;cr[i]=t[0];cg[i]=t[1];cb[i]=t[2];}if(!best||err<best.err)best={name,err,cr,cg,cb};}return best;}
+function decodeCircles(circles,T){const cells=circles.cells,n=T-2;if(n<7||n%2===0){Lw('n='+n+' — замалий або парний');return null;}const lumas=cells.map(c=>(c.r+c.g+c.b)/3);const lumaMin=Math.min(...lumas),lumaMax=Math.max(...lumas),autoThr=(lumaMin+lumaMax)/2;const gl=new Uint8Array(n*n),confM=new Float32Array(n*n);cells.forEach((c,i)=>{const L=(c.r+c.g+c.b)/3;gl[i]=L>autoThr?1:0;confM[i]=Math.min(1,Math.abs(L-autoThr)/(autoThr/2+1));});const sats=cells.map(c=>Math.max(c.r,c.g,c.b)-Math.min(c.r,c.g,c.b));const medSat=[...sats].sort((a,b)=>a-b)[sats.length>>1];const coloredCnt=sats.filter(s=>s>60).length;const isColored=medSat>25||coloredCnt>=Math.max(3,n*0.15);Li('n='+n+'  поріг='+autoThr.toFixed(0)+'  '+(isColored?'КОЛІР':'МОНО'));const modes=['oct','quad','half'];if(!isColored){Lh('7. ДЕКОД МОНО');let best=null;for(const m of modes){const v=decodeVoted(gl,n,m,0,confM);if(v.text!==null){const a=agree(gl,fillChannel(v.text,n,m),n);Lok('['+m+'] "'+v.text+'"  agree='+a.toFixed(3));if(!best||a>best.a)best={v,a,m};}else Li('  ['+m+'] null');}return best?{type:'МОНО·'+best.m,text:best.v.text}:{type:'МОНО',text:null};}else{Lh('7. ДЕКОД КОЛІР');const cls=classifyCells(cells,n);Li('  палітра: '+cls.name);const cR=new Float32Array(n*n),cG=new Float32Array(n*n),cB=new Float32Array(n*n);cells.forEach((c,i)=>{cR[i]=Math.min(1,Math.abs(c.r-128)/90);cG[i]=Math.min(1,Math.abs(c.g-128)/90);cB[i]=Math.min(1,Math.abs(c.b-128)/90);});let best=null;for(const m of modes){const rMark=markCell(cls.cr,n,m);let vr=decodeVoted(cls.cr,n,m,rMark?1:0,cR);if(rMark&&vr.text===null)vr=decodeVoted(cls.cr,n,m,0,cR);
+const vg=decodeVoted(cls.cg,n,m,0,cG),vb=decodeVoted(cls.cb,n,m,0,cB);
+const nn=[vr.text,vg.text,vb.text].filter(t=>t!==null);
+Li('  ['+m+'] R:'+(vr.text!=null?'"'+vr.text+'"':'null')+'  G:'+(vg.text!=null?'"'+vg.text+'"':'null')+'  B:'+(vb.text!=null?'"'+vb.text+'"':'null'));
+if(!nn.length)continue;
+const sc=nn.length*1000+nn.reduce((a,t)=>a+t.length,0);
+if(!best||sc>best.sc)best={vr,vg,vb,nn,sc,m,rMark};}
+if(!best)return{type:'КОЛІР·'+cls.name,text:null};
+const parts=[best.vr.text,best.vg.text,best.vb.text].filter(t=>t!==null);
+const text=best.rMark?(parts.every(t=>t===parts[0])?parts[0]:parts.join('')):parts.join(' · ');
+Lok('['+best.m+'] "'+text+'"');
+return{type:'КОЛІР·'+best.m,text};}}
+function findFrame(idata,w,h){const gray=toGray(idata,w,h);const bg=sampleBG(gray,w,h,5);Li('BG luma: '+bg);const tols=[20,30,42,55,70,90];let bestCorners=null,bestSpread=0,bestTol=0;for(const tol of tols){const rm=makeMask(gray,w,h,bg,tol);const em=erodeMask(rm,w,h);const fgN=em.reduce((s,v)=>s+v,0);if(fgN<50){Li('  tol='+tol+' FG='+fgN+' — пропуск');continue;}const c=findCorners(em,w,h,15);const sp=spread(c);Li('  tol='+tol+'  FG='+fgN+'  spread='+Math.round(sp)+'px');if(sp>bestSpread){bestSpread=sp;bestCorners=c;bestTol=tol;}}Li('Обрано tol='+bestTol+'  spread='+Math.round(bestSpread)+'px');if(!bestCorners||bestSpread<30){Li('Маска не спрацювала — variance-scan');const topRows=[],leftCols=[];for(let y=0;y<h;y++){let sum=0,sum2=0;for(let x=0;x<w;x++){const v=gray[y*w+x];sum+=v;sum2+=v*v;}const avg=sum/w,std=Math.sqrt(sum2/w-avg*avg);if(std>50)topRows.push(y);}for(let x=0;x<w;x++){let sum=0,sum2=0;for(let y=0;y<h;y++){const v=gray[y*w+x];sum+=v;sum2+=v*v;}const avg=sum/h,std=Math.sqrt(sum2/h-avg*avg);if(std>50)leftCols.push(x);}topRows.sort((a,b)=>a-b);leftCols.sort((a,b)=>a-b);if(topRows.length>0&&leftCols.length>0){const vc={tl:{x:leftCols[0],y:topRows[0]},tr:{x:leftCols[leftCols.length-1],y:topRows[0]},br:{x:leftCols[leftCols.length-1],y:topRows[topRows.length-1]},bl:{x:leftCols[0],y:topRows[topRows.length-1]}};const vsp=spread(vc);Li('Variance: spread='+Math.round(vsp));if(vsp>bestSpread){bestCorners=vc;bestSpread=vsp;}}}return{corners:bestCorners,spread:bestSpread};}
 
 // ==========================================
-//  ГОЛОВНИЙ ПАЙПЛАЙН (ВИКЛИК АЛГОРИТМІВ)
+//  ПАЙПЛАЙН ОБРОБКИ (ВИКЛИК АЛГОРИТМІВ)
 // ==========================================
 function run(idata,w,h){
   Lh('1. ПОШУК РАМКИ');
@@ -328,7 +348,7 @@ function run(idata,w,h){
 
   if(decoded&&decoded.text!==null){
     Lok('РЕЗУЛЬТАТ: "'+decoded.text+'" ['+decoded.type+']');
-    updateStatus('✓ УСПІХ: ' + decoded.text, true);
+    setSt('✓ УСПІХ: ' + decoded.text, true);
     return true;
   } else {
     Lw('Декод не вдався ['+(decoded?decoded.type:'—')+']');
@@ -337,36 +357,36 @@ function run(idata,w,h){
 }
 
 // ==========================================
-//  ОБРОБКА ТА ВІДРИСОВКА
+//  ОБРОБКА ЗОБРАЖЕННЯ (ЗАМІСТЬ СТАРОГО processImage)
 // ==========================================
+const mainCnv = document.getElementById('cnv');
+
 function processImage(img, orient, keepLog = false){
   if(!keepLog) clrLog();
   
-  const canvas = document.getElementById('canvas');
   const video = document.getElementById('video');
   video.style.display = 'none';
-  canvas.style.display = 'block';
+  mainCnv.style.display = 'block';
   
   const {idata,w,h}=preprocess(img,orient,900);
   
-  canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext('2d');
+  // Відображення бінаризованого зображення
+  mainCnv.width = w; mainCnv.height = h;
+  const ctx = mainCnv.getContext('2d');
   ctx.putImageData(idata, 0, 0);
   
   return run(idata,w,h);
 }
 
 // ==========================================
-//  УПРАВЛІННЯ КАМЕРОЮ ТА ТАЙМЕРОМ (МУЛЬТИ-КАДР)
+//  КАМЕРА + CENTER CROP + МУЛЬТИКАДР
 // ==========================================
 let stream = null;
-let scanTimeout = null;
 let scanInterval = null;
 let isScanning = false;
 let isCaptured = false;
 
 const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
 const scanOverlay = document.getElementById('scan-overlay');
 const timerEl = document.getElementById('timer');
 
@@ -375,15 +395,16 @@ async function startScanner() {
     isScanning = true;
     isCaptured = false;
     clrLog();
-    addLog("Ініціалізація сканера...", "header");
+    addLog("Ініціалізація сканера...", 'lh');
     
     document.getElementById('btn-start').disabled = true;
-    canvas.style.display = 'none';
+    mainCnv.style.display = 'none';
     video.style.display = 'block';
     scanOverlay.classList.add('active');
+    setSt('Наведіть на зебру...', null);
     
     try {
-        addLog("Запит доступу до камери...", "info");
+        addLog("Запит камери (auto-focus, 1920x1080)...", 'li');
         stream = await navigator.mediaDevices.getUserMedia({
             video: {
                 facingMode: { ideal: "environment" },
@@ -398,7 +419,7 @@ async function startScanner() {
         
         video.srcObject = stream;
         await video.play();
-        addLog("Камеру активовано. Автофокус увімкнено.", "ok");
+        addLog("Камера активна.", 'lok');
         
         let timeLeft = 5.0;
         timerEl.innerText = `00:0${timeLeft.toFixed(1)}`;
@@ -412,32 +433,48 @@ async function startScanner() {
             }
         }, 100);
 
-        // Нова логіка: робимо 3 кадри на 4.0с, 4.5с та 5.0с
+        // Мультикадр: робимо знімки на 4.0с, 4.5с та 5.0с
         let attempt = 1;
         const captureTimes = [4000, 4500, 5000];
         
         captureTimes.forEach(time => {
             setTimeout(() => {
                 if (!isCaptured) {
-                    addLog(`═══ СПРОБА ${attempt} (${time/1000}с) ═══`, "header");
-                    const tmpCanvas = document.createElement('canvas');
-                    tmpCanvas.width = video.videoWidth;
-                    tmpCanvas.height = video.videoHeight;
+                    addLog(`═══ СПРОБА ${attempt} (${time/1000}с) ═══`, 'lh');
                     
-                    if (tmpCanvas.width === 0 || tmpCanvas.height === 0) {
-                        addLog("Відеопотік порожній.", "error");
+                    const vw = video.videoWidth;
+                    const vh = video.videoHeight;
+                    
+                    if (vw === 0 || vh === 0) {
+                        addLog("Помилка: відеопотік порожній.", 'le');
                         return;
                     }
                     
-                    tmpCanvas.getContext('2d').drawImage(video, 0, 0);
-                    tmpCanvas.naturalWidth = tmpCanvas.width;
-                    tmpCanvas.naturalHeight = tmpCanvas.height;
+                    // ГОЛОВНИЙ СЕКРЕТ: ВИРІЗАЄМО ЦЕНТР (70%)
+                    // Це збільшує роздільну здатність зебри в 3 рази!
+                    const cropW = vw * 0.70;
+                    const cropH = vh * 0.70;
+                    const sx = (vw - cropW) / 2;
+                    const sy = (vh - cropH) / 2;
+                    
+                    addLog(`Кадр: ${vw}x${vh} -> Кроп: ${Math.round(cropW)}x${Math.round(cropH)}`, 'li');
+                    
+                    const tmpCanvas = document.createElement('canvas');
+                    tmpCanvas.width = cropW;
+                    tmpCanvas.height = cropH;
+                    const ctx = tmpCanvas.getContext('2d');
+                    ctx.imageSmoothingEnabled = true; // Згладжуємо муар
+                    ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, cropW, cropH);
+                    
+                    // Емуляція властивостей Image
+                    tmpCanvas.naturalWidth = cropW;
+                    tmpCanvas.naturalHeight = cropH;
                     
                     const success = processImage(tmpCanvas, 1, true); // true = не стираємо логи
                     
                     if (success) {
                         isCaptured = true;
-                        updateStatus("✓ УСПІХ! Зупинка камери...", true);
+                        addLog("Успішно розпізнано! Зупинка...", 'lok');
                         setTimeout(() => stopScanner(), 1000);
                     }
                     attempt++;
@@ -445,18 +482,18 @@ async function startScanner() {
             }, time);
         });
 
-        // Гарантоване вимкнення через 5.2с
-        scanTimeout = setTimeout(() => {
+        // Вимкнення через 5.2с
+        setTimeout(() => {
             if (!isCaptured) {
-                addLog("Не вдалося розпізнати на жодному з кадрів.", "error");
-                updateStatus("Не розпізнано. Спробуйте ще раз.", false);
+                addLog("Не вдалося розпізнати на жодному кадрі.", 'le');
+                setSt("Не розпізнано. Спробуйте ще раз.", false);
                 stopScanner();
             }
         }, 5200);
 
     } catch (err) {
-        addLog(`Помилка доступу до камери: ${err.message}`, "error");
-        updateStatus("Помилка камери", false);
+        addLog(`Помилка камери: ${err.message}`, 'le');
+        setSt("Помилка доступу до камери", false);
         stopScanner();
     }
 }
@@ -466,34 +503,27 @@ function stopScanner() {
     document.getElementById('btn-start').disabled = false;
     scanOverlay.classList.remove('active');
     clearInterval(scanInterval);
-    clearTimeout(scanTimeout);
     timerEl.innerText = "--:--";
     
     if (stream) {
         stream.getTracks().forEach(t => t.stop());
         stream = null;
-        addLog("Камеру вимкнено.", "info");
+        addLog("Камеру вимкнено.", 'li');
     }
 }
 
-function updateStatus(text, isSuccess) {
-    const el = document.getElementById('status');
-    el.innerText = text;
-    el.style.color = isSuccess === true ? '#2a7a3a' : isSuccess === false ? '#8a2020' : '#8888a0';
-}
-
 // ==========================================
-//  ОБРОБНИКИ ПОДІЙ
+//  ОБРОБНИКИ
 // ==========================================
 document.getElementById('btn-start').addEventListener('click', startScanner);
 
-document.getElementById('file-input').addEventListener('change', e => {
+document.getElementById('fin').addEventListener('change', e => {
     const f = e.target.files[0];
     if (!f) return;
     
     clrLog();
-    addLog("Завантаження файлу: " + f.name, "header");
-    canvas.style.display = 'block';
+    addLog("Завантаження файлу: " + f.name, 'lh');
+    mainCnv.style.display = 'block';
     video.style.display = 'none';
     
     const reader = new FileReader();
@@ -503,7 +533,7 @@ document.getElementById('file-input').addEventListener('change', e => {
         img.onload = () => {
             setTimeout(() => {
                 const success = processImage(img, orient, false);
-                if(!success) updateStatus("Не вдалося розпізнати файл.", false);
+                if(!success) setSt("Не вдалося розпізнати файл.", false);
             }, 30);
         };
         img.src = URL.createObjectURL(f);

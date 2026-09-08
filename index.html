@@ -56,7 +56,8 @@
     position: absolute;
     top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 80%; aspect-ratio: 1;
+    width: 65%; /* ЗМІНЕНО: БУЛО 80% - тепер краї коду точно не обрізаються */
+    aspect-ratio: 1;
     border: 2px dashed rgba(58, 122, 170, 0.5);
     display: none;
     pointer-events: none;
@@ -159,7 +160,6 @@ function addLog(msg, type = 'info') {
     logEl.scrollTop = logEl.scrollHeight;
 }
 
-// Мапінг для твоїх старих функцій логування
 const Lh = m => addLog('═══ ' + m, 'header');
 const Lok = m => addLog('✓ ' + m, 'ok');
 const Lw = m => addLog('⚠ ' + m, 'warn');
@@ -339,8 +339,9 @@ function run(idata,w,h){
 // ==========================================
 //  ОБРОБКА ТА ВІДРИСОВКА
 // ==========================================
-function processImage(img, orient){
-  clrLog();
+function processImage(img, orient, keepLog = false){
+  if(!keepLog) clrLog();
+  
   const canvas = document.getElementById('canvas');
   const video = document.getElementById('video');
   video.style.display = 'none';
@@ -348,22 +349,21 @@ function processImage(img, orient){
   
   const {idata,w,h}=preprocess(img,orient,900);
   
-  // Відображення результату бінаризації на екрані
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
   ctx.putImageData(idata, 0, 0);
   
-  updateStatus('Обробка...', null);
   return run(idata,w,h);
 }
 
 // ==========================================
-//  УПРАВЛІННЯ КАМЕРОЮ ТА ТАЙМЕРОМ
+//  УПРАВЛІННЯ КАМЕРОЮ ТА ТАЙМЕРОМ (МУЛЬТИ-КАДР)
 // ==========================================
 let stream = null;
 let scanTimeout = null;
 let scanInterval = null;
 let isScanning = false;
+let isCaptured = false;
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -373,6 +373,7 @@ const timerEl = document.getElementById('timer');
 async function startScanner() {
     if (isScanning) return;
     isScanning = true;
+    isCaptured = false;
     clrLog();
     addLog("Ініціалізація сканера...", "header");
     
@@ -399,9 +400,8 @@ async function startScanner() {
         await video.play();
         addLog("Камеру активовано. Автофокус увімкнено.", "ok");
         
-        // Таймер на 5 секунд
-        let timeLeft = 5;
-        timerEl.innerText = `00:0${timeLeft}`;
+        let timeLeft = 5.0;
+        timerEl.innerText = `00:0${timeLeft.toFixed(1)}`;
         
         scanInterval = setInterval(() => {
             timeLeft -= 0.1;
@@ -412,53 +412,51 @@ async function startScanner() {
             }
         }, 100);
 
+        // Нова логіка: робимо 3 кадри на 4.0с, 4.5с та 5.0с
+        let attempt = 1;
+        const captureTimes = [4000, 4500, 5000];
+        
+        captureTimes.forEach(time => {
+            setTimeout(() => {
+                if (!isCaptured) {
+                    addLog(`═══ СПРОБА ${attempt} (${time/1000}с) ═══`, "header");
+                    const tmpCanvas = document.createElement('canvas');
+                    tmpCanvas.width = video.videoWidth;
+                    tmpCanvas.height = video.videoHeight;
+                    
+                    if (tmpCanvas.width === 0 || tmpCanvas.height === 0) {
+                        addLog("Відеопотік порожній.", "error");
+                        return;
+                    }
+                    
+                    tmpCanvas.getContext('2d').drawImage(video, 0, 0);
+                    tmpCanvas.naturalWidth = tmpCanvas.width;
+                    tmpCanvas.naturalHeight = tmpCanvas.height;
+                    
+                    const success = processImage(tmpCanvas, 1, true); // true = не стираємо логи
+                    
+                    if (success) {
+                        isCaptured = true;
+                        updateStatus("✓ УСПІХ! Зупинка камери...", true);
+                        setTimeout(() => stopScanner(), 1000);
+                    }
+                    attempt++;
+                }
+            }, time);
+        });
+
+        // Гарантоване вимкнення через 5.2с
         scanTimeout = setTimeout(() => {
-            addLog("Тайм-аут 5с. Спроба захопити останній кадр...", "warn");
-            captureAndStop();
-        }, 5000);
+            if (!isCaptured) {
+                addLog("Не вдалося розпізнати на жодному з кадрів.", "error");
+                updateStatus("Не розпізнано. Спробуйте ще раз.", false);
+                stopScanner();
+            }
+        }, 5200);
 
     } catch (err) {
         addLog(`Помилка доступу до камери: ${err.message}`, "error");
         updateStatus("Помилка камери", false);
-        stopScanner();
-    }
-}
-
-function captureAndStop() {
-    if (!stream) return;
-    
-    clearInterval(scanInterval);
-    clearTimeout(scanTimeout);
-    
-    try {
-        // Захоплення кадру безпосередньо в Canvas (без JPEG)
-        const tmpCanvas = document.createElement('canvas');
-        tmpCanvas.width = video.videoWidth;
-        tmpCanvas.height = video.videoHeight;
-        
-        if (tmpCanvas.width === 0 || tmpCanvas.height === 0) {
-             addLog("Відеопотік порожній. Захоплення неможливе.", "error");
-             stopScanner();
-             return;
-        }
-
-        tmpCanvas.getContext('2d').drawImage(video, 0, 0);
-        addLog("Кадр захоплено. Розмір: " + tmpCanvas.width + "x" + tmpCanvas.height, "info");
-        
-        // Емуляція властивостей Image для твоєї функції preprocess
-        tmpCanvas.naturalWidth = tmpCanvas.width;
-        tmpCanvas.naturalHeight = tmpCanvas.height;
-        
-        const success = processImage(tmpCanvas, 1); // Орієнтація 1 для камери
-        
-        if (!success) {
-            updateStatus("Не вдалося розпізнати. Спробуйте ще раз.", false);
-        }
-        
-    } catch (e) {
-        addLog("Помилка обробки кадру: " + e.message, "error");
-        updateStatus("Помилка обробки", false);
-    } finally {
         stopScanner();
     }
 }
@@ -503,7 +501,10 @@ document.getElementById('file-input').addEventListener('change', e => {
         const orient = getExifOrientation(ev.target.result);
         const img = new Image();
         img.onload = () => {
-            setTimeout(() => processImage(img, orient), 30);
+            setTimeout(() => {
+                const success = processImage(img, orient, false);
+                if(!success) updateStatus("Не вдалося розпізнати файл.", false);
+            }, 30);
         };
         img.src = URL.createObjectURL(f);
     };

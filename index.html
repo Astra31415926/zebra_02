@@ -636,8 +636,16 @@ document.getElementById('camBtn').addEventListener('click',async()=>{
 document.getElementById('capBtn').addEventListener('click',()=>{
   if(!stream)return;
   const tmp=document.createElement('canvas');
-  tmp.width=vid.videoWidth||640;tmp.height=vid.videoHeight||480;
-  tmp.getContext('2d').drawImage(vid,0,0);
+  
+  const track = stream.getVideoTracks()[0];
+  const settings = track ? track.getSettings() : {};
+  
+  tmp.width = settings.width || vid.videoWidth || 1920;
+  tmp.height = settings.height || vid.videoHeight || 1080;
+  
+  const ctx = tmp.getContext('2d');
+  ctx.drawImage(vid, 0, 0, tmp.width, tmp.height);
+  
   const img=new Image();
   img.onload=()=>setTimeout(()=>processImage(img,1),30);
   img.src=tmp.toDataURL('image/png');

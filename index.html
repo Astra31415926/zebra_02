@@ -497,114 +497,6 @@ function warpPerspective(idata,sw,sh,corners,S){
   return out;
 }
 
-// ════════════════════════════════════════════════════════
-//  PEEL TO ZEBRA — використовує інваріантну структуру TAINA
-//
-//  Структура коду ззовні всередину:
-//    білий фон
-//    чорна полоска    1 модуль    ← 0 переходів
-//    біла полоска     1-2 модулі  ← 0 переходів
-//    ЗЕБРА            1 модуль    ← ~4×T переходів  ◄── шукаємо це
-//    код
-//
-//  Скануємо кільця від краю всередину. Перше кільце з великою
-//  кількістю переходів = зовнішній край зебри. Все що зовні — обрізаємо.
-//  Працює незалежно від кольору фону.
-// ════════════════════════════════════════════════════════
-
-// Аналіз одного квадратного кільця на відступі d
-function ringStats(wGray,S,d){
-  if(d<0||d*2>=S-4)return{tr:0,contrast:0,regular:0};
-  const vals=[];
-  const a=d,b=S-1-d;
-  for(let x=a;x<=b;x++)vals.push(wGray[a*S+x]);        // top →
-  for(let y=a+1;y<=b;y++)vals.push(wGray[y*S+b]);      // right ↓
-  for(let x=b-1;x>=a;x--)vals.push(wGray[b*S+x]);      // bottom ←
-  for(let y=b-1;y>a;y--)vals.push(wGray[y*S+a]);       // left ↑
-
-  let mn=255,mx=0;
-  for(const v of vals){if(v<mn)mn=v;if(v>mx)mx=v;}
-  const contrast=mx-mn;
-  if(contrast<35)return{tr:0,contrast,regular:0};
-
-  const thr=(mn+mx)>>1;
-  let tr=0,prev=vals[0]>thr?1:0,runLen=1;
-  const runs=[];
-  for(let i=1;i<vals.length;i++){
-    const bit=vals[i]>thr?1:0;
-    if(bit!==prev){tr++;runs.push(runLen);prev=bit;runLen=1;}
-    else runLen++;
-  }
-  runs.push(runLen);
-
-  // Регулярність: наскільки однакові довжини сегментів
-  let regular=0;
-  if(runs.length>=6){
-    const sorted=[...runs].sort((a,b)=>a-b);
-    const med=sorted[sorted.length>>1];
-    if(med>=2){
-      const ok=runs.filter(r=>r>=med*0.45&&r<=med*2.2).length;
-      regular=ok/runs.length;
-    }
-  }
-  return{tr,contrast,regular};
-}
-
-// Знаходить кандидатні відступи де починається зебра
-function findZebraInsets(wGray,S,log=false){
-  const maxD=Math.floor(S*0.20);
-  const step=Math.max(1,Math.floor(S/240));
-  const profile=[];
-  for(let d=0;d<maxD;d+=step){
-    const st=ringStats(wGray,S,d);
-    profile.push({d,...st});
-  }
-  if(!profile.length)return[0];
-
-  // Зебра: багато переходів + висока регулярність
-  const zebraLike=profile.filter(p=>p.tr>=12&&p.regular>=0.55);
-
-  const insets=[0];// завжди пробуємо без обрізки
-
-  if(zebraLike.length){
-    // Перший (найзовнішній) кільце-зебра
-    const first=zebraLike[0].d;
-    if(first>0)insets.push(first);
-    // Трохи всередину і назовні від нього
-    if(first-step>0)insets.push(first-step);
-    if(first+step<maxD)insets.push(first+step);
-    if(log)Li('  peel: зебра на d='+first+' (tr='+zebraLike[0].tr+' reg='+zebraLike[0].regular.toFixed(2)+')');
-  }else{
-    // Фолбек: шукаємо найбільший стрибок кількості переходів
-    let bestJump=0,bestD=0;
-    for(let i=1;i<profile.length;i++){
-      const jump=profile[i].tr-profile[i-1].tr;
-      if(jump>bestJump){bestJump=jump;bestD=profile[i].d;}
-    }
-    if(bestJump>=8&&bestD>0){
-      insets.push(bestD);
-      if(log)Li('  peel: стрибок переходів на d='+bestD+' (+'+bestJump+')');
-    }
-  }
-
-  // Дедуп + сортування
-  return[...new Set(insets)].filter(d=>d>=0&&d*2<S*0.5).sort((a,b)=>a-b);
-}
-
-// Обрізає ImageData квадрат на відступ d з усіх боків
-function insetImageData(warped,S,d){
-  if(d<=0)return{data:warped,S};
-  const S2=S-2*d;
-  if(S2<60)return{data:warped,S};
-  const out=new ImageData(S2,S2);
-  for(let y=0;y<S2;y++)for(let x=0;x<S2;x++){
-    const s=((y+d)*S+(x+d))*4,o=(y*S2+x)*4;
-    out.data[o]=warped.data[s];out.data[o+1]=warped.data[s+1];
-    out.data[o+2]=warped.data[s+2];out.data[o+3]=255;
-  }
-  return{data:out,S:S2};
-}
-
 // ── verifyZebra — ТОЧНО v6.2 ──
 function verifyZebra(wGray,S,minContrast){
   function scanLine(arr){
@@ -851,34 +743,16 @@ function processROI(idata,w,h,roi,log=false){
   timings.warp=Math.round(performance.now()-t2);
   if(!warped)return null;
 
-  // ── PEEL + verifyZebra: перебираємо відступи щоб відрізати
-  //    зовнішню чорну обводку і білу зону перед зеброю ──
+  // verifyZebra
   const t3=performance.now();
-  const wGray0=toGray(warped.data,S_WARP,S_WARP);
-  const insets=findZebraInsets(wGray0,S_WARP,log);
-  if(log)Li('  insets: ['+insets.join(', ')+']');
-
-  let zebra=null,useWarped=warped,useS=S_WARP,usedInset=0;
-  let bestZConf=-1;
-
-  for(const d of insets){
-    const{data:wd,S:ws}=insetImageData(warped,S_WARP,d);
-    const wg=toGray(wd.data,ws,ws);
-    const z=verifyZebra(wg,ws,45);
-    if(!z)continue;
-    if(log)Li('    d='+d+' → T='+z.T+' conf='+(z.confidence*100).toFixed(0)+'%');
-    // Обираємо за впевненістю зебри
-    if(z.confidence>bestZConf){
-      bestZConf=z.confidence;zebra=z;useWarped=wd;useS=ws;usedInset=d;
-    }
-  }
+  const wGray=toGray(warped.data,S_WARP,S_WARP);
+  const zebra=verifyZebra(wGray,S_WARP,45);
   timings.zebra=Math.round(performance.now()-t3);
   if(!zebra)return null;
-  if(log&&usedInset>0)Lok('    peel d='+usedInset+' застосовано');
 
   // circles
   const t4=performance.now();
-  const circles=sampleCircles(useWarped,useS,zebra.T,zebra.modSize);
+  const circles=sampleCircles(warped,S_WARP,zebra.T,zebra.modSize);
   timings.circles=Math.round(performance.now()-t4);
 
   // decode
@@ -895,15 +769,10 @@ function processROI(idata,w,h,roi,log=false){
     bl:{x:roi.x0+corners.bl.x,y:roi.y0+corners.bl.y}
   };
 
-  // Штраф за слабку зебру — конф нижче 0.25 майже напевно хибний кандидат
-  const zPenalty=zebra.confidence<0.25?0.15:1.0;
-
   return{
-    roi,corners:origCorners,spread:sp,bgSrc,inset:usedInset,
-    warped:useWarped,warpedS:useS,zebra,circles,decoded,timings,
-    confidence:(decoded&&decoded.text!==null)
-      ?zebra.confidence*(decoded.score||0.5)*zPenalty
-      :zebra.confidence*0.1*zPenalty
+    roi,corners:origCorners,spread:sp,bgSrc,
+    warped,zebra,circles,decoded,timings,
+    confidence:(decoded&&decoded.text!==null)?zebra.confidence*(decoded.score||0.5):zebra.confidence*0.1
   };
 }
 
@@ -944,7 +813,7 @@ const cnvMain=document.getElementById('cnv-main');
 function drawResult(result){
   if(!result)return;
   const{warped,zebra,circles}=result;
-  const S=result.warpedS||S_WARP,T=zebra.T,modSize=zebra.modSize;
+  const S=S_WARP,T=zebra.T,modSize=zebra.modSize;
   cnvMain.width=S;cnvMain.height=S;
   const ctx=cnvMain.getContext('2d');
   ctx.putImageData(warped,0,0);
@@ -996,7 +865,7 @@ function drawResult(result){
 function buildRGBPanel(result){
   if(!result)return;
   const{warped,zebra,circles}=result;
-  const S=result.warpedS||S_WARP,T=zebra.T,modSize=zebra.modSize;
+  const S=S_WARP,T=zebra.T,modSize=zebra.modSize;
   const grid=document.getElementById('rgb-grid');grid.innerHTML='';
   const labels=['Warped','R','G','B'],colors=[[255,50,50],[50,220,50],[50,100,255]];
   const canvases=labels.map(lbl=>{const tile=document.createElement('div');tile.className='rgb-tile';const c=document.createElement('canvas');c.width=S;c.height=S;const l=document.createElement('div');l.className='rgb-lbl';l.textContent=lbl;tile.appendChild(c);tile.appendChild(l);grid.appendChild(tile);return c;});
@@ -1045,7 +914,6 @@ function updateDiag(result,cands,frameIdx,totalFrames,candResults){
       if(passed){
         html+=` T=${res.zebra.T} conf=${(res.zebra.confidence*100).toFixed(0)}%`;
         html+=` bg:${res.bgSrc||'?'}`;
-        if(res.inset>0)html+=` peel:${res.inset}`;
       }
       html+=`</div>`;
     });
@@ -1061,8 +929,6 @@ function updateDiag(result,cands,frameIdx,totalFrames,candResults){
     html+=`<div class="diag-row"><span class="dk">голоси</span><span class="diag-val" style="font-size:11px">${z.voteStr}</span></div>`;
     html+=`<div class="diag-row"><span class="dk">roi метод</span><span class="diag-val">${result.roi.method}</span></div>`;
     html+=`<div class="diag-row"><span class="dk">BG src</span><span class="diag-val">${result.bgSrc||'—'}</span></div>`;
-    html+=`<div class="diag-row"><span class="dk">peel inset</span><span class="diag-val" style="color:${result.inset>0?'var(--ok)':'var(--muted)'}">${result.inset||0} px</span></div>`;
-    html+=`<div class="diag-row"><span class="dk">warp S</span><span class="diag-val">${result.warpedS||S_WARP} px</span></div>`;
     html+=`<div class="diag-row"><span class="dk">spread</span><span class="diag-val">${Math.round(result.spread)} px</span></div>`;
     html+=`<div class="diag-row"><span class="dk">ROI</span><span class="diag-val">${result.roi.x0},${result.roi.y0} ${result.roi.w}×${result.roi.h}</span></div>`;
   }

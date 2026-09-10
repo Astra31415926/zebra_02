@@ -898,6 +898,23 @@ function scanLoopStop(){
 
 function scanTick(){
   if(!stream||!vid.videoWidth)return;
+  
+  // Додавання кадру в галерею для відлагодження
+  const dbgCanvas = document.createElement('canvas');
+  dbgCanvas.width = vid.videoWidth;
+  dbgCanvas.height = vid.videoHeight;
+  const dbgCtx = dbgCanvas.getContext('2d');
+  dbgCtx.drawImage(vid, 0, 0);
+  const dbgUrl = dbgCanvas.toDataURL('image/png');
+  let dbgGal = document.getElementById('debug-gallery');
+  if(!dbgGal){
+    dbgGal = document.createElement('div');
+    dbgGal.id = 'debug-gallery';
+    dbgGal.style = 'position:fixed; bottom:0; left:0; width:100%; height:100px; background:rgba(0,0,0,0.8); overflow-x:auto; display:flex; z-index:9999;';
+    document.body.appendChild(dbgGal);
+  }
+  dbgGal.insertAdjacentHTML('afterbegin', `<img src="${dbgUrl}" style="height:90px; margin:5px; border:1px solid #fff;">`);
+
   const elapsed=Date.now()-scanStartTime;
   if(elapsed>=SCAN_TIMEOUT){
     scanLoopStop();
